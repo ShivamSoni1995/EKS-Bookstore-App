@@ -1,0 +1,22 @@
+# AWS credentials
+*.pem
+*.key
+*-key.json
+
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Kubernetes
+kubeconfig
+
+# OS files
+.DS_Store
+Thumbs.DB
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
