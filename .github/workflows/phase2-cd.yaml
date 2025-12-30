@@ -1,0 +1,4 @@
+name: Phase2-CD
+on:
+  push:
+    branches: [main]
