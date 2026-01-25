@@ -1,0 +1,83 @@
+name: CD - Deploy to EKS
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: bookstore-eks
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-and-deploy:
+    name: Build and Deploy to EKS
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push images
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          # Build and push API
+          cd api
+          docker build -t $ECR_REGISTRY/bookstore-api:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/bookstore-api:latest \
+                       -t $ECR_REGISTRY/bookstore-api:production .
+          docker push $ECR_REGISTRY/bookstore-api:$IMAGE_TAG
+          docker push $ECR_REGISTRY/bookstore-api:latest
+          docker push $ECR_REGISTRY/bookstore-api:production
+          cd ..
+          
+          # Build and push UI
+          cd ui
+          docker build -t $ECR_REGISTRY/bookstore-ui:$IMAGE_TAG \
+                       -t $ECR_REGISTRY/bookstore-ui:latest \
+                       -t $ECR_REGISTRY/bookstore-ui:production .
+          docker push $ECR_REGISTRY/bookstore-ui:$IMAGE_TAG
+          docker push $ECR_REGISTRY/bookstore-ui:latest
+          docker push $ECR_REGISTRY/bookstore-ui:production
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'v1.28.0'
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      - name: Deploy to EKS
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          kubectl apply -f k8s/namespace.yaml
+          
+          sed -i "s|\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/bookstore-api:latest|$ECR_REGISTRY/bookstore-api:$IMAGE_TAG|g" k8s/api-deployment.yaml
+          sed -i "s|\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/bookstore-ui:latest|$ECR_REGISTRY/bookstore-ui:$IMAGE_TAG|g" k8s/ui-deployment.yaml
+          
+          kubectl apply -f k8s/api-deployment.yaml
+          kubectl apply -f k8s/ui-deployment.yaml
+          kubectl apply -f k8s/ingress.yaml
+          
+          kubectl rollout status deployment/api -n bookstore --timeout=300s
+          kubectl rollout status deployment/ui -n bookstore --timeout=300s
