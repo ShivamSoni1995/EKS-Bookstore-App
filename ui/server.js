@@ -1,41 +1,24 @@
+// server.js
 const http = require('http');
 const handler = require('serve-handler');
 const { createProxyMiddleware } = require('http-proxy-middleware');
 
-// ----------------------------------
-// Runtime Configuration (IMPORTANT)
-// ----------------------------------
-const API_URL = process.env.API_BASE_URL || 'http://localhost:5000';
-const PORT = process.env.PORT || 3000;
 
-// ----------------------------------
-// HTTP Server
-// ----------------------------------
+const API_URL = 'http://api';
+
 const server = http.createServer((req, res) => {
-
-  // -----------------------------
-  // Health Check (MANDATORY)
-  // -----------------------------
-  if (req.url === '/health') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    return res.end(JSON.stringify({ status: 'ok' }));
-  }
-
-  // -----------------------------
-  // API Proxy
-  // -----------------------------
+  // Check if the request is for the API
   if (req.url.startsWith('/api/')) {
+    // Set up proxy to your internal API
     const proxy = createProxyMiddleware({
       target: API_URL,
       changeOrigin: true,
     });
-
+    
     return proxy(req, res);
   }
-
-  // -----------------------------
-  // Serve React Static Files
-  // -----------------------------
+  
+  // Otherwise serve static files
   return handler(req, res, {
     public: 'build',
     rewrites: [
@@ -44,10 +27,7 @@ const server = http.createServer((req, res) => {
   });
 });
 
-// ----------------------------------
-// Start Server
-// ----------------------------------
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`UI server running on port ${PORT}`);
-  console.log(`Proxying API requests to ${API_URL}`);
+  console.log(`Server running at http://localhost:${PORT}`);
 });

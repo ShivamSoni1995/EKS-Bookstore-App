@@ -1,1 +1,0 @@
-module "node_group" { source="terraform-aws-modules/eks/aws//modules/eks-managed-node-group" cluster_name=module.eks.cluster_name subnet_ids=module.vpc.public_subnets name="bookstore-ng" instance_types=["t3.medium"] scaling_config { desired_size=2 min_size=1 max_size=2 } }
