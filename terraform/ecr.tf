@@ -26,18 +26,18 @@ resource "aws_ecr_repository" "ui" {
   }
 }
 
-# Lifecycle policy to keep only last 10 images
+# Lifecycle policy to keep only last 5 images (cost savings on ECR storage)
 resource "aws_ecr_lifecycle_policy" "api" {
   repository = aws_ecr_repository.api.name
 
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep last 10 images"
+      description  = "Keep last 5 images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 10
+        countNumber = 5
       }
       action = {
         type = "expire"
@@ -52,11 +52,11 @@ resource "aws_ecr_lifecycle_policy" "ui" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Keep last 10 images"
+      description  = "Keep last 5 images"
       selection = {
         tagStatus   = "any"
         countType   = "imageCountMoreThan"
-        countNumber = 10
+        countNumber = 5
       }
       action = {
         type = "expire"

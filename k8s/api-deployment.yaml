@@ -6,7 +6,7 @@ metadata:
   labels:
     app: api
 spec:
-  replicas: 2
+  replicas: 1  # Single replica for cost savings
   selector:
     matchLabels:
       app: api

@@ -7,6 +7,12 @@ const { createProxyMiddleware } = require('http-proxy-middleware');
 const API_URL = 'http://api';
 
 const server = http.createServer((req, res) => {
+  // Health check endpoint
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ status: 'healthy', timestamp: new Date().toISOString() }));
+  }
+  
   // Check if the request is for the API
   if (req.url.startsWith('/api/')) {
     // Set up proxy to your internal API

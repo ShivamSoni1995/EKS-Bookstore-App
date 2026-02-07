@@ -13,13 +13,13 @@ variable "cluster_version" {
 variable "node_instance_types" {
   description = "EC2 instance types for worker nodes"
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["t3.small"]  # ~$15/mo vs t3.medium ~$30/mo per node
 }
 
 variable "desired_size" {
   description = "Desired number of worker nodes"
   type        = number
-  default     = 2
+  default     = 1  # Single node for cost savings
 }
 
 variable "min_size" {
@@ -31,5 +31,5 @@ variable "min_size" {
 variable "max_size" {
   description = "Maximum number of worker nodes"
   type        = number
-  default     = 4
+  default     = 2  # Reduced from 4 to limit cost exposure
 }
