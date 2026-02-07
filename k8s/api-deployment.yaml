@@ -17,9 +17,13 @@ spec:
     spec:
       containers:
         - name: api
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/bookstore-api:latest
+          image: 342206309108.dkr.ecr.us-east-1.amazonaws.com/bookstore-api:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 5000
+          env:
+            - name: FLASK_APP
+              value: "main.py"
           resources:
             requests:
               memory: "128Mi"

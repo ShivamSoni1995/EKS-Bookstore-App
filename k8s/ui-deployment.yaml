@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: ui
-          image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/bookstore-ui:latest
+          image: 342206309108.dkr.ecr.us-east-1.amazonaws.com/bookstore-ui:latest
           ports:
             - containerPort: 3000
           resources:
