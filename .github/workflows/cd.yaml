@@ -72,8 +72,9 @@ jobs:
         run: |
           kubectl apply -f k8s/namespace.yaml
           
-          sed -i "s|\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/bookstore-api:latest|$ECR_REGISTRY/bookstore-api:$IMAGE_TAG|g" k8s/api-deployment.yaml
-          sed -i "s|\${AWS_ACCOUNT_ID}.dkr.ecr.\${AWS_REGION}.amazonaws.com/bookstore-ui:latest|$ECR_REGISTRY/bookstore-ui:$IMAGE_TAG|g" k8s/ui-deployment.yaml
+          # Replace any ECR image reference with the new SHA-tagged image
+          sed -i "s|342206309108.dkr.ecr.us-east-1.amazonaws.com/bookstore-api:[a-zA-Z0-9]*|$ECR_REGISTRY/bookstore-api:$IMAGE_TAG|g" k8s/api-deployment.yaml
+          sed -i "s|342206309108.dkr.ecr.us-east-1.amazonaws.com/bookstore-ui:[a-zA-Z0-9]*|$ECR_REGISTRY/bookstore-ui:$IMAGE_TAG|g" k8s/ui-deployment.yaml
           
           kubectl apply -f k8s/api-deployment.yaml
           kubectl apply -f k8s/ui-deployment.yaml
