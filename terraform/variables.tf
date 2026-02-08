@@ -19,7 +19,7 @@ variable "node_instance_types" {
 variable "desired_size" {
   description = "Desired number of worker nodes"
   type        = number
-  default     = 1  # Single node for cost savings
+  default     = 2  # Scaled up to support monitoring stack
 }
 
 variable "min_size" {
