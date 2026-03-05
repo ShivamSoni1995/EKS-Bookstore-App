@@ -1,4 +1,55 @@
+
 # 📚 EKS Bookstore App
+
+---
+
+## Manual Setup Before `bootstrap.sh`
+
+Before running the automated deployment script, you must perform these manual steps:
+
+1. **Initialize Terraform:**
+   ```bash
+   cd terraform
+   terraform init
+   ```
+
+2. **First Terraform Apply (create cluster, skip aws-auth):**
+   - Edit `eks-cluster.tf` and set:
+     ```
+     manage_aws_auth_configmap = false
+     ```
+   - Then run:
+     ```bash
+     terraform apply
+     ```
+
+3. **Second Terraform Apply (manage aws-auth):**
+   - Edit `eks-cluster.tf` and set:
+     ```
+     manage_aws_auth_configmap = true
+     ```
+   - Then run:
+     ```bash
+     terraform apply
+     ```
+
+4. **Update GitHub Secret:**
+   - Copy the new `github_actions_role_arn` from:
+     ```bash
+     terraform output github_actions_role_arn
+     ```
+   - Update the `AWS_ROLE_ARN` secret in your GitHub repository settings.
+
+5. **(Optional) Update `cd.yaml` if cluster name changed:**
+   - If the EKS cluster name changed, update the `EKS_CLUSTER_NAME` in `.github/workflows/cd.yaml`.
+
+After these steps, you can safely run:
+```bash
+chmod +x bootstrap.sh
+./bootstrap.sh
+```
+
+---
 
 A full-stack bookstore web application deployed on **Amazon EKS** with automated CI/CD via **GitHub Actions**, infrastructure-as-code with **Terraform**, and cluster monitoring with **Prometheus + Grafana**.
 
