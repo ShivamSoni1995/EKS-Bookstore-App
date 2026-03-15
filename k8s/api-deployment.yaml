@@ -17,10 +17,11 @@ spec:
     spec:
       containers:
         - name: api
-          image: 342206309108.dkr.ecr.us-east-1.amazonaws.com/bookstore-api:latest
-          imagePullPolicy: Always
+          image: bookstore-api:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 5000
+              name: http
           env:
             - name: FLASK_APP
               value: "main.py"
@@ -49,10 +50,13 @@ kind: Service
 metadata:
   name: api
   namespace: bookstore
+  labels:
+    app: api
 spec:
   selector:
     app: api
   ports:
-    - port: 80
+    - name: http
+      port: 80
       targetPort: 5000
   type: ClusterIP

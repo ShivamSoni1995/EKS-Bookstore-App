@@ -18,10 +18,16 @@ WORKDIR /app
 
 # Copy package files and install ONLY production dependencies
 COPY package*.json ./
-RUN npm ci --only=production --no-audit --no-fund \
-    && npm cache clean --force \
-    && rm -rf /tmp/* /var/tmp/* \
-    && rm -rf ~/.npm
+# Add npm retry settings for network resilience
+ENV npm_config_fetch_retries=5
+ENV npm_config_fetch_retry_factor=10
+ENV npm_config_fetch_retry_mintimeout=20000
+ENV npm_config_fetch_retry_maxtimeout=120000
+# Use npm install instead of npm ci for better reliability
+RUN npm install --only=production --no-audit --no-fund \
+  && npm cache clean --force \
+  && rm -rf /tmp/* /var/tmp/* \
+  && rm -rf ~/.npm
 
 # Copy built application from build stage
 COPY --from=build /app/build ./build

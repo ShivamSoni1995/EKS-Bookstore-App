@@ -3,3 +3,4 @@ flask==2.2.3
 flask-cors==3.0.10
 psycopg[binary]==3.1.18
 werkzeug==2.2.2
+prometheus_flask_exporter==0.23.0

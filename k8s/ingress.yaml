@@ -4,11 +4,8 @@ metadata:
   name: bookstore-ingress
   namespace: bookstore
   annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/healthcheck-path: /
+    nginx.ingress.kubernetes.io/rewrite-target: /
 spec:
-  ingressClassName: alb
   rules:
     - http:
         paths:

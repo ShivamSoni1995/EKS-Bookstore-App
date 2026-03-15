@@ -1,10 +1,14 @@
 # app.py
 from flask import Flask, jsonify, request
 import os
+
 from flask_cors import CORS
+from prometheus_flask_exporter import PrometheusMetrics
+
 
 app = Flask(__name__)
 CORS(app)
+metrics = PrometheusMetrics(app)
 
 # Mock data for development - Updated book categories
 mock_categories = [
