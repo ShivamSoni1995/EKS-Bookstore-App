@@ -4,11 +4,11 @@ metadata:
   name: bookstore-ingress
   namespace: bookstore
   annotations:
-    kubernetes.io/ingress.class: alb
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
+    # NGINX Ingress Controller annotations — for local k3d testing only
+    # For EKS/ALB production use k8s/ingress.yaml instead
+    nginx.ingress.kubernetes.io/use-regex: "true"
 spec:
-  ingressClassName: alb
+  ingressClassName: nginx
   rules:
     - http:
         paths:

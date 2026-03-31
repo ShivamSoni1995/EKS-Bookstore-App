@@ -120,11 +120,13 @@ A full-stack bookstore web application deployed on **Amazon EKS** with automated
 │       └── pages/                # Home, ProductList, ProductDetail, Cart
 │
 ├── k8s/                          # Kubernetes manifests
-│   ├── namespace.yaml            # bookstore namespace
-│   ├── api-deployment.yaml       # API deployment + ClusterIP service (port 5000)
-│   ├── ui-deployment.yaml        # UI deployment + ClusterIP service (port 3000)
-│   ├── ingress.yaml              # ALB ingress: /api/* → api, /* → ui
-│   └── prometheus-values.yaml    # Helm values for kube-prometheus-stack
+│   ├── namespace.yaml                    # bookstore namespace
+│   ├── api-deployment.yaml               # API deployment + ClusterIP service (port 5000, named: http)
+│   ├── ui-deployment.yaml                # UI deployment + ClusterIP service (port 3000)
+│   ├── ingress.yaml                      # ALB ingress: /api/* → api, /* → ui (EKS only)
+│   ├── ingress-local.yaml                # NGINX ingress: for local k3d testing
+│   ├── api-metrics-servicemonitor.yaml   # ServiceMonitor: scrapes /metrics every 15s
+│   └── prometheus-values.yaml            # Helm values for kube-prometheus-stack
 │
 ├── terraform/                    # Infrastructure as Code
 │   ├── main.tf                   # Providers, random cluster name suffix
@@ -239,7 +241,7 @@ Push to main
 
 ## Local Development
 
-### API
+### API (standalone)
 
 ```bash
 cd api
@@ -247,15 +249,145 @@ pip install -r requirements.txt
 export FLASK_APP=main.py
 flask run --port 5000
 # → http://localhost:5000/api/health
+# → http://localhost:5000/metrics
 ```
 
-### UI
+### UI (standalone)
 
 ```bash
 cd ui
 npm install
 npm start
 # → http://localhost:3000
+```
+
+---
+
+## Local Testing with k3d
+
+Run the full stack locally (app + Prometheus + Grafana) using [k3d](https://k3d.io) — no AWS account required.
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/)
+- [k3d](https://k3d.io/#installation) v5+
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [Helm](https://helm.sh/docs/intro/install/) v3+
+
+### 1. Create the k3d cluster
+
+Create the cluster with a load-balancer port mapping and Traefik disabled (so NGINX Ingress Controller can be used instead):
+
+```bash
+k3d cluster create bookstore \
+  --port "9080:80@loadbalancer" \
+  --k3s-arg "--disable=traefik@server:0"
+```
+
+Then install the NGINX Ingress Controller:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.10.1/deploy/static/provider/cloud/deploy.yaml
+kubectl wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=90s
+```
+
+### 2. Build and import Docker images
+
+```bash
+# Build images locally
+docker build -t bookstore-api:latest ./api
+docker build -t bookstore-ui:latest ./ui
+
+# Import into k3d (avoids registry pull — no ECR needed)
+k3d image import bookstore-api:latest bookstore-ui:latest -c bookstore
+```
+
+> **Note:** `imagePullPolicy: IfNotPresent` is already set in both deployment manifests, so k3d will use the imported images without attempting to pull from ECR.
+
+### 3. Deploy the application
+
+```bash
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/api-deployment.yaml
+kubectl apply -f k8s/ui-deployment.yaml
+
+# Apply the local ingress (nginx annotations — NOT the ALB ingress.yaml)
+kubectl apply -f k8s/ingress-local.yaml
+
+# Wait for pods to be ready
+kubectl rollout status deployment/api -n bookstore
+kubectl rollout status deployment/ui -n bookstore
+```
+
+### 4. Access the application
+
+With the NGINX ingress in place, everything is accessible via `localhost:9080` (the port mapped in step 1):
+
+```bash
+# API — via ingress
+curl http://localhost:9080/api/health
+curl http://localhost:9080/api/categories
+curl http://localhost:9080/api/products/featured
+
+# UI — open in browser
+# http://localhost:9080
+```
+
+> **Note:** Do not apply `k8s/ingress.yaml` locally — it uses AWS ALB annotations that only work on EKS. Use `k8s/ingress-local.yaml` instead (nginx annotations, `ingressClassName: nginx`).
+
+### 5. Install monitoring stack
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+
+helm install prometheus prometheus-community/kube-prometheus-stack \
+  -n monitoring --create-namespace \
+  -f k8s/prometheus-values.yaml
+
+# Deploy the ServiceMonitor for Flask app metrics
+kubectl apply -f k8s/api-metrics-servicemonitor.yaml
+```
+
+### 6. Access monitoring dashboards
+
+```bash
+# Grafana
+kubectl port-forward svc/prometheus-grafana 3001:80 -n monitoring &
+# → http://localhost:3001   Login: admin / bookstore-admin
+
+# Prometheus
+kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n monitoring &
+# → http://localhost:9090
+```
+
+### 7. Generate traffic and verify metrics
+
+```bash
+# Generate some API traffic (via ingress on port 9080)
+for i in $(seq 1 20); do
+  curl -s http://localhost:9080/api/health > /dev/null
+  curl -s http://localhost:9080/api/products/featured > /dev/null
+  curl -s http://localhost:9080/api/categories > /dev/null
+done
+
+# Verify /metrics endpoint is working (port-forward needed for /metrics — not exposed via ingress)
+kubectl port-forward svc/api 5000:80 -n bookstore &
+curl http://localhost:5000/metrics | grep flask_http_request_total
+```
+
+Then open Prometheus at http://localhost:9090 and query:
+```promql
+sum(flask_http_request_total)
+```
+
+### 8. Tear down
+
+```bash
+k3d cluster delete bookstore
 ```
 
 ---
@@ -288,11 +420,25 @@ sum(rate(container_cpu_usage_seconds_total{namespace="bookstore"}[5m])) by (pod)
 # Pod memory usage
 sum(container_memory_working_set_bytes{namespace="bookstore"}) by (pod)
 
-# HTTP request rate (if instrumented)
-rate(flask_http_request_total[5m])
-
 # Node count
 count(kube_node_info)
+
+# --- Flask App Metrics (from prometheus_flask_exporter) ---
+
+# Total HTTP requests
+sum(flask_http_request_total)
+
+# HTTP request rate (per second, 5m window)
+sum(rate(flask_http_request_total[5m]))
+
+# HTTP request rate by endpoint
+sum(rate(flask_http_request_total[5m])) by (endpoint)
+
+# API error rate (non-2xx responses)
+sum(rate(flask_http_request_total{status!~"2.."}[5m]))
+
+# Request latency p99
+histogram_quantile(0.99, sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le, endpoint))
 ```
 
 ---

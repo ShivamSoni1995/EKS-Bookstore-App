@@ -79,6 +79,7 @@ jobs:
           kubectl apply -f k8s/api-deployment.yaml
           kubectl apply -f k8s/ui-deployment.yaml
           kubectl apply -f k8s/ingress.yaml
+          kubectl apply -f k8s/api-metrics-servicemonitor.yaml
           
           kubectl rollout status deployment/api -n bookstore --timeout=300s
           kubectl rollout status deployment/ui -n bookstore --timeout=300s

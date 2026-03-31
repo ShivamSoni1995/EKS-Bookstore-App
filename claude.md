@@ -144,6 +144,19 @@ EKS-Bookstore-App/
 
 ## Key Decisions & Gotchas
 
+### App-Level Metrics (Flask + Prometheus)
+- `prometheus_flask_exporter` added to `api/main.py` — exposes `/metrics` endpoint
+- `requirements.txt` includes `prometheus_flask_exporter`
+- `api-deployment.yaml` containerPort named `http` (required for ServiceMonitor discovery)
+- `api` Service has label `app: api` (required for ServiceMonitor selector)
+- `k8s/api-metrics-servicemonitor.yaml` — ServiceMonitor scrapes `/metrics` on port `http` every 15s
+- Label `release: prometheus` on ServiceMonitor ensures kube-prometheus-stack picks it up
+- Key PromQL queries:
+  - Total HTTP requests: `sum(flask_http_request_total)`
+  - Request rate: `sum(rate(flask_http_request_total[5m]))`
+  - Error rate: `sum(rate(flask_http_request_total{status!~"2.."}[5m]))`
+  - Request rate by endpoint: `sum(rate(flask_http_request_total[5m])) by (endpoint)`
+
 ### Bugs That Were Fixed (remember these on recreate)
 1. **`manage_aws_auth_configmap`**: Must be `false` on first `terraform apply`, then change to `true` on second apply. The ConfigMap doesn't exist before the cluster is created.
 2. **Public subnet auto-assign IP**: `map_public_ip_on_launch = true` is required in vpc.tf or nodes can't reach the internet.
@@ -154,12 +167,20 @@ EKS-Bookstore-App/
 7. **EBS CSI driver**: Not installed by default on EKS. Prometheus `storageSpec` set to `{}` (emptyDir) to avoid PVC stuck in Pending.
 8. **Frontend test**: Cannot import `react-router-dom` in CI environment. Test simplified to smoke test without router dependency.
 9. **CD pipeline sed pattern**: Must match actual ECR URLs in manifests (e.g., `342206309108.dkr.ecr.us-east-1.amazonaws.com/bookstore-api:[a-zA-Z0-9]*`), not placeholder variables.
+10. **ServiceMonitor no active targets**: Two fixes required — (a) containerPort in the Deployment must be named `http`, and (b) the `api` Service must have the label `app: api`. Without these, ServiceMonitor cannot discover the target.
+11. **ingress.yaml nginx annotation**: The ingress originally had `nginx.ingress.kubernetes.io/rewrite-target: /` which is incorrect for EKS ALB. Replaced with `ingressClassName: alb` + `alb.ingress.kubernetes.io/scheme: internet-facing` + `alb.ingress.kubernetes.io/target-type: ip`.
+12. **CD pipeline missing ServiceMonitor apply**: `api-metrics-servicemonitor.yaml` was not being applied in the CD pipeline. Added to `cd.yaml` after `kubectl apply -f k8s/ingress.yaml`.
 
 ### Helm Releases Installed Manually (not in Terraform)
 | Release | Namespace | Chart |
 |---------|-----------|-------|
 | `aws-load-balancer-controller` | `kube-system` | `eks/aws-load-balancer-controller` |
 | `prometheus` | `monitoring` | `prometheus-community/kube-prometheus-stack` |
+
+### ServiceMonitor (managed by kubectl)
+| Resource | Namespace | File |
+|----------|-----------|------|
+| `bookstore-api-metrics` ServiceMonitor | `bookstore` | `k8s/api-metrics-servicemonitor.yaml` |
 
 ---
 

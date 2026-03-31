@@ -190,13 +190,14 @@ EKS 1.28 cluster running 2 SPOT t3.small nodes. All app resources live in the
 
 ### 3.1  Key Manifest Files (k8s/)
 
-| File                    | What it does                                              |
-|-------------------------|-----------------------------------------------------------|
-| namespace.yaml          | Creates the 'bookstore' namespace                         |
-| api-deployment.yaml     | 1 replica, ClusterIP service on port 5000                 |
-| ui-deployment.yaml      | 1 replica, ClusterIP service on port 3000                 |
-| ingress.yaml            | ALB ingress: /api/* → api:80, /* → ui:80                  |
-| prometheus-values.yaml  | Helm values: resource limits, emptyDir, no PVC            |
+| File                            | What it does                                              |
+|---------------------------------|-----------------------------------------------------------|
+| namespace.yaml                  | Creates the 'bookstore' namespace                         |
+| api-deployment.yaml             | 1 replica, ClusterIP service, port 5000 (named: http)     |
+| ui-deployment.yaml              | 1 replica, ClusterIP service on port 3000                 |
+| ingress.yaml                    | ALB ingress: /api/* → api:80, /* → ui:80                  |
+| prometheus-values.yaml          | Helm values: resource limits, emptyDir, no PVC            |
+| api-metrics-servicemonitor.yaml | ServiceMonitor: scrapes /metrics from API pod every 15s   |
 
 
 ### 3.2  Networking & Ingress
@@ -300,6 +301,25 @@ Values file (k8s/prometheus-values.yaml) key settings:
   - storageSpec: {} — uses emptyDir (no PersistentVolumeClaim)
   - No EBS CSI driver installed, so PVCs would get stuck in Pending without this setting
 
+### 4.2  App-Level Metrics (Flask Instrumentation)
+
+  # Applied as part of bootstrap.sh
+  kubectl apply -f k8s/api-metrics-servicemonitor.yaml
+
+How it works:
+  - prometheus_flask_exporter added to api/main.py — auto-instruments all Flask routes
+  - Exposes /metrics endpoint on the API pod (port 5000)
+  - api-deployment.yaml containerPort named 'http' — required for ServiceMonitor discovery
+  - api Service has label app: api — required for ServiceMonitor selector to match
+  - ServiceMonitor has label release: prometheus — required for kube-prometheus-stack pickup
+  - Prometheus scrapes /metrics every 15 seconds automatically
+
+CRITICAL GOTCHA: ServiceMonitor no active targets
+  Two things are required for ServiceMonitor discovery:
+  1. containerPort in the Deployment must have name: http
+  2. The Service must have the label app: api
+  Without either, Prometheus shows 0 active targets for the ServiceMonitor.
+
 
 ### 4.2  Accessing Grafana
 
@@ -314,7 +334,7 @@ Values file (k8s/prometheus-values.yaml) key settings:
   → http://localhost:9090
 
 
-### 4.4  Useful PromQL Queries
+### 4.5  Useful PromQL Queries
 
   # Pod CPU usage
   sum(rate(container_cpu_usage_seconds_total{namespace="bookstore"}[5m])) by (pod)
@@ -322,14 +342,28 @@ Values file (k8s/prometheus-values.yaml) key settings:
   # Pod memory usage
   sum(container_memory_working_set_bytes{namespace="bookstore"}) by (pod)
 
-  # HTTP request rate (if Flask is instrumented)
-  rate(flask_http_request_total[5m])
-
   # Node count
   count(kube_node_info)
 
+  # --- Flask App Metrics (from prometheus_flask_exporter) ---
 
-### 4.5  Resource & Design Decisions
+  # Total HTTP requests (all time)
+  sum(flask_http_request_total)
+
+  # HTTP request rate (per second, 5m window)
+  sum(rate(flask_http_request_total[5m]))
+
+  # HTTP request rate by endpoint
+  sum(rate(flask_http_request_total[5m])) by (endpoint)
+
+  # API error rate (non-2xx responses)
+  sum(rate(flask_http_request_total{status!~"2.."}[5m]))
+
+  # Request latency (p99)
+  histogram_quantile(0.99, sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le, endpoint))
+
+
+### 4.6  Resource & Design Decisions
 
 - emptyDir for Prometheus storage: no persistent data — monitoring data resets on pod restart.
   Acceptable for a demo; in production use PersistentVolumeClaims via EBS CSI driver.
@@ -339,7 +373,7 @@ Values file (k8s/prometheus-values.yaml) key settings:
   provides cluster-level and node-level metrics out of the box.
 
 
-### 4.6  Interview Tips
+### 4.7  Interview Tips
 
 ✔ "I chose kube-prometheus-stack because it bundles everything — Prometheus, Grafana,
   Alertmanager, and exporters — in a single Helm release. Much faster than wiring them
@@ -389,7 +423,8 @@ After terraform apply, bootstrap.sh automates everything else:
   4. kubectl apply -f k8s/ (namespace, deployments, services, ingress)
   5. Installs aws-load-balancer-controller via Helm
   6. Installs kube-prometheus-stack via Helm
-  7. Updates the EKS_CLUSTER_NAME in .github/workflows/cd.yaml
+  7. Applies ServiceMonitor (kubectl apply -f k8s/api-metrics-servicemonitor.yaml)
+  8. Updates the EKS_CLUSTER_NAME in .github/workflows/cd.yaml
 
 After bootstrap.sh, two manual steps remain:
   - Update the AWS_ROLE_ARN GitHub secret with the new IAM role ARN
@@ -435,6 +470,23 @@ security groups created by the controller will block VPC deletion.
 
 9. CD pipeline sed pattern must match the actual ECR URL format exactly —
    using variable placeholders silently failed to update the image tag.
+
+10. ServiceMonitor showed 0 active targets — two fixes were required:
+    (a) containerPort in Deployment must have name: http
+    (b) Service must have the label app: api
+    Prometheus uses the service label selector in the ServiceMonitor to find the Service,
+    then follows the endpoint to scrape the pod. Missing either breaks discovery entirely.
+
+11. ingress.yaml had nginx annotation (rewrite-target) instead of ALB annotations.
+    The nginx.ingress.kubernetes.io/rewrite-target annotation is only for NGINX Ingress Controller,
+    not AWS ALB. Fixed by replacing with:
+      ingressClassName: alb
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+
+12. CD pipeline was not applying api-metrics-servicemonitor.yaml after deployment.
+    The ServiceMonitor only existed in the cluster if applied manually or via bootstrap.sh.
+    Fixed by adding kubectl apply -f k8s/api-metrics-servicemonitor.yaml to cd.yaml.
 
 ---
 

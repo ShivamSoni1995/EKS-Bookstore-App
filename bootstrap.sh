@@ -98,9 +98,15 @@ fi
 kubectl apply -f k8s/ingress.yaml
 echo "  LB Controller and Ingress deployed!"
 
-# ─── 7. Scale nodes & install monitoring ───
+# ─── 7. Apply ServiceMonitor for app metrics ───
 echo ""
-echo "[9/9] Setting up monitoring..."
+echo "[9/10] Applying ServiceMonitor for Flask API metrics..."
+kubectl apply -f k8s/api-metrics-servicemonitor.yaml
+echo "  ServiceMonitor deployed — Prometheus will scrape /metrics from the API pod"
+
+# ─── 8. Scale nodes & install monitoring ───
+echo ""
+echo "[10/10] Setting up monitoring..."
 
 # Scale node group to 2 for monitoring pods
 NODEGROUP=$(aws eks list-nodegroups --cluster-name "$CLUSTER_NAME" --region "$REGION" --query 'nodegroups[0]' --output text)
@@ -175,6 +181,11 @@ echo "            http://localhost:3001  (admin / bookstore-admin)"
 echo ""
 echo "  Prometheus: kubectl port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090 -n monitoring"
 echo "              http://localhost:9090"
+echo ""
+echo "  App Metrics (PromQL examples):"
+echo "    sum(flask_http_request_total)                          # Total HTTP requests"
+echo "    sum(rate(flask_http_request_total[5m]))               # Request rate"
+echo "    sum(rate(flask_http_request_total{status!~'2..'}[5m])) # Error rate"
 echo ""
 echo "  ⚠️  MANUAL STEPS REMAINING:"
 echo "  1. Update GitHub secret AWS_ROLE_ARN to: $GH_ROLE_ARN"
