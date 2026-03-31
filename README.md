@@ -1,6 +1,28 @@
 
 # 📚 EKS Bookstore App
 
+A full-stack bookstore application deployed on **Amazon EKS** with automated CI/CD, infrastructure-as-code, and production-grade monitoring — built to demonstrate real-world DevOps practices on AWS.
+
+![AWS](https://img.shields.io/badge/AWS-EKS-FF9900?logo=amazon-aws)
+![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform)
+![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker)
+![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=github-actions)
+
+---
+
+## What This Project Covers
+
+| # | Topic | What You'll Learn |
+|---|-------|-------------------|
+| 1 | **Containerization** | Dockerize a Python Flask API and React UI with multi-stage builds |
+| 2 | **Infrastructure as Code** | Provision an EKS cluster, VPC, ECR, and IAM roles with Terraform |
+| 3 | **Kubernetes** | Deploy pods, services, and ingress; manage namespaces and rollouts |
+| 4 | **CI/CD Pipeline** | Automate test → build → push → deploy using GitHub Actions with OIDC (no stored keys) |
+| 5 | **Ingress & Load Balancing** | Route external traffic via AWS ALB (EKS) and NGINX Ingress Controller (local) |
+| 6 | **Observability** | Instrument Flask with Prometheus metrics; scrape via ServiceMonitor; visualize in Grafana |
+| 7 | **Cost Optimization** | Use SPOT instances, public-only subnets (no NAT gateway), and ECR lifecycle policies |
+| 8 | **Local Testing** | Reproduce the full stack locally with k3d — no AWS account required |
+
 ---
 
 ## Manual Setup Before `bootstrap.sh`
@@ -48,15 +70,6 @@ After these steps, you can safely run:
 chmod +x bootstrap.sh
 ./bootstrap.sh
 ```
-
----
-
-A full-stack bookstore web application deployed on **Amazon EKS** with automated CI/CD via **GitHub Actions**, infrastructure-as-code with **Terraform**, and cluster monitoring with **Prometheus + Grafana**.
-
-![AWS](https://img.shields.io/badge/AWS-EKS-FF9900?logo=amazon-aws)
-![Terraform](https://img.shields.io/badge/IaC-Terraform-7B42BC?logo=terraform)
-![Docker](https://img.shields.io/badge/Container-Docker-2496ED?logo=docker)
-![GitHub Actions](https://img.shields.io/badge/CI%2FCD-GitHub%20Actions-2088FF?logo=github-actions)
 
 ---
 
