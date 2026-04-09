@@ -73,46 +73,6 @@ chmod +x bootstrap.sh
 
 ---
 
-## Architecture
-
-```
-                    ┌───────────────────────────────────────────────────┐
-┌──────────┐        │  AWS (us-east-1)                                  │
-│  GitHub  │  OIDC  │  ┌─────────┐    ┌──────────────────────────────┐  │
-│  Actions ├────────┤  │   ECR   │    │  EKS Cluster (K8s 1.28)     │  │
-│  CI / CD │        │  │ api/ui  │    │                              │  │
-└──────────┘        │  └─────────┘    │  ┌───────┐    ┌───────┐     │  │
-                    │                 │  │  API  │    │  UI   │     │  │
-┌──────────┐        │  ┌──────────┐   │  │ Flask │    │ React │     │  │
-│  Users   ├────────┤  │   ALB   ├───▶│  └───┬───┘    └───┬───┘     │  │
-│ (browser)│        │  │(internet)│   │      └─────┬──────┘         │  │
-└──────────┘        │  └──────────┘   │      Ingress│               │  │
-                    │                 │  ┌─────────┴──────────┐     │  │
-                    │                 │  │ Monitoring Stack    │     │  │
-                    │                 │  │ Prometheus + Grafana│     │  │
-                    │                 │  └────────────────────┘     │  │
-                    │                 └──────────────────────────────┘  │
-                    │  VPC 10.0.0.0/16 · 2 AZs · Public subnets only  │
-                    └───────────────────────────────────────────────────┘
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Frontend** | React 19, React Router 7, served via Node.js (`server.js`) |
-| **Backend** | Python 3.11, Flask 2.2.3, Flask-CORS |
-| **Containers** | Docker (multi-stage build for UI, slim image for API) |
-| **Orchestration** | Amazon EKS (Kubernetes 1.28) |
-| **Infrastructure** | Terraform (AWS provider ~5.0, EKS module ~19.0) |
-| **CI/CD** | GitHub Actions with OIDC authentication (no stored keys) |
-| **Ingress** | AWS Application Load Balancer (via aws-load-balancer-controller) |
-| **Registry** | Amazon ECR (bookstore-api, bookstore-ui) |
-| **Monitoring** | kube-prometheus-stack (Prometheus, Grafana, Alertmanager) |
-
----
 
 ## Project Structure
 
