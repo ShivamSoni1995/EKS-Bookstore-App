@@ -1,0 +1,239 @@
+================================================================================
+  EKS BOOKSTORE APP — MONITORING REFERENCE
+  Last updated: April 10, 2026
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STACK OVERVIEW
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Tool             Version / Source                        Namespace
+  ─────────────────────────────────────────────────────────────────────────────
+  Prometheus       kube-prometheus-stack (Helm)            monitoring
+  Grafana          kube-prometheus-stack (Helm)            monitoring
+  Alertmanager     kube-prometheus-stack (Helm)            monitoring
+  Node Exporter    kube-prometheus-stack (Helm)            monitoring
+  kube-state-metrics kube-prometheus-stack (Helm)          monitoring
+  ServiceMonitor   monitoring.coreos.com/v1 (kubectl)      bookstore
+
+  Helm install command:
+    helm install prometheus prometheus-community/kube-prometheus-stack \
+      -n monitoring --create-namespace \
+      -f k8s/prometheus-values.yaml
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  HOW METRICS FLOW (END-TO-END)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Flask API pod  →  /metrics endpoint (port 5000)
+       ↑
+  prometheus_flask_exporter instruments all routes automatically
+       ↓
+  ServiceMonitor (bookstore namespace) discovers the API Service
+  by matching label  app: api  and port name  http
+       ↓
+  Prometheus scrapes http://<pod-ip>:5000/metrics  every 15 seconds
+       ↓
+  Metrics stored in Prometheus (emptyDir, 3-day retention)
+       ↓
+  Grafana queries Prometheus via built-in datasource
+  User views dashboards at localhost:3001
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  FLASK API INSTRUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Library       : prometheus_flask_exporter==0.23.0  (api/requirements.txt)
+  Initialized   : api/main.py
+                    from prometheus_flask_exporter import PrometheusMetrics
+                    metrics = PrometheusMetrics(app)
+
+  Effect        : All Flask routes are auto-instrumented.
+                  Exposes /metrics endpoint on port 5000.
+                  No per-route annotation needed.
+
+  Key metrics exposed:
+    flask_http_request_total          counter   requests by method + status
+    flask_http_request_duration_seconds histogram request latency by endpoint
+    flask_http_request_exceptions_total counter   unhandled exceptions
+    python_gc_*                        gauge     Python garbage collector stats
+    process_*                          gauge     CPU, memory, file descriptors
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SERVICEMONITOR  (k8s/api-metrics-servicemonitor.yaml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  apiVersion : monitoring.coreos.com/v1
+  kind       : ServiceMonitor
+  name       : bookstore-api-metrics
+  namespace  : bookstore
+  label      : release: prometheus   ← must match Helm release name so
+                                       kube-prometheus-stack picks it up
+
+  spec:
+    selector.matchLabels : app: api        ← matches the api Service label
+    endpoints.port       : http            ← matches containerPort name in
+                                             api-deployment.yaml
+    endpoints.path       : /metrics
+    endpoints.interval   : 15s
+    namespaceSelector    : bookstore
+
+  TWO things that MUST be correct for ServiceMonitor to work:
+    1. The api Service metadata MUST have label  app: api
+    2. The containerPort in api-deployment.yaml MUST have  name: http
+       Without the named port, ServiceMonitor cannot match the endpoint.
+
+  Deploy command:
+    kubectl apply -f k8s/api-metrics-servicemonitor.yaml
+
+  Verify target is up:
+    kubectl port-forward svc/prometheus-kube-prometheus-prometheus \
+      9090:9090 -n monitoring
+    # Open http://localhost:9090/targets → look for
+    # serviceMonitor/bookstore/bookstore-api-metrics/0  →  Health: up
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PROMETHEUS CONFIG  (k8s/prometheus-values.yaml)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Tuned for t3.small (2 vCPU, 2 GB RAM) — cost-optimised
+
+  Component        requests           limits         notes
+  ─────────────────────────────────────────────────────────────────────────────
+  Prometheus       100m CPU, 256Mi    512Mi          retention: 3d, emptyDir
+  Grafana          50m CPU,  128Mi    256Mi          adminPassword: bookstore-admin
+  Alertmanager     25m CPU,  64Mi     128Mi
+  Node Exporter    25m CPU,  32Mi     64Mi
+
+  Storage : storageSpec: {}   →  emptyDir (no PVC)
+            Data is lost on pod restart. EBS CSI driver is NOT installed.
+
+  Disabled components (not needed for small cluster):
+    kubeEtcd, kubeControllerManager, kubeScheduler, kubeProxy
+
+  Service type : ClusterIP (access via port-forward only)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ACCESS COMMANDS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Grafana
+    kubectl port-forward svc/prometheus-grafana 3001:80 -n monitoring &
+    URL      : http://localhost:3001
+    Username : admin
+    Password : bookstore-admin
+    (retrieve from secret: kubectl get secret prometheus-grafana -n monitoring \
+      -o jsonpath="{.data.admin-password}" | base64 --decode)
+
+  Prometheus
+    kubectl port-forward svc/prometheus-kube-prometheus-prometheus \
+      9090:9090 -n monitoring &
+    URL      : http://localhost:9090
+
+  Alertmanager
+    kubectl port-forward svc/prometheus-kube-prometheus-alertmanager \
+      9093:9093 -n monitoring &
+    URL      : http://localhost:9093
+
+  Flask /metrics (direct)
+    kubectl port-forward svc/api 5000:80 -n bookstore &
+    curl http://localhost:5000/metrics
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  KEY PROMQL QUERIES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Total HTTP requests (all time):
+    sum(flask_http_request_total)
+
+  Request rate (last 5 min):
+    sum(rate(flask_http_request_total[5m]))
+
+  Request rate by endpoint:
+    sum(rate(flask_http_request_total[5m])) by (endpoint)
+
+  Error rate (non-2xx):
+    sum(rate(flask_http_request_total{status!~"2.."}[5m]))
+
+  Error rate by status code:
+    sum(rate(flask_http_request_total[5m])) by (status)
+
+  P95 request latency:
+    histogram_quantile(0.95,
+      sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le))
+
+  P95 latency by endpoint:
+    histogram_quantile(0.95,
+      sum(rate(flask_http_request_duration_seconds_bucket[5m])) by (le, endpoint))
+
+  CPU usage by pod (bookstore namespace):
+    sum(rate(container_cpu_usage_seconds_total{namespace="bookstore"}[5m]))
+      by (pod)
+
+  Memory usage by pod:
+    sum(container_memory_working_set_bytes{namespace="bookstore"})
+      by (pod)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Problem : ServiceMonitor shows 0 active targets in Prometheus
+  ─────────────────────────────────────────────────────────────
+  Check 1 : Does the api Service have the label app: api?
+              kubectl get svc api -n bookstore --show-labels
+              Fix: add  labels: app: api  under Service metadata
+
+  Check 2 : Does the containerPort have name: http?
+              kubectl describe deployment api -n bookstore | grep -A5 Ports
+              Fix: add  name: http  to the containerPort in api-deployment.yaml
+
+  Check 3 : Does the ServiceMonitor have label release: prometheus?
+              kubectl get servicemonitor -n bookstore -o yaml | grep release
+              Fix: ensure  release: prometheus  is in ServiceMonitor labels
+
+  Check 4 : Is Prometheus watching the bookstore namespace?
+              Check namespaceSelector in servicemonitor yaml matches bookstore
+
+
+  Problem : Prometheus PVC stuck in Pending
+  ──────────────────────────────────────────
+  Cause   : EBS CSI driver not installed on EKS by default.
+  Fix     : Use  storageSpec: {}  in prometheus-values.yaml (already done).
+            This uses emptyDir — data resets on pod restart.
+
+
+  Problem : Grafana pod stuck at 2/3 containers
+  ──────────────────────────────────────────────
+  Wait    : The grafana-sc-datasources init container can take 30-60s.
+  Check   : kubectl describe pod -l app.kubernetes.io/name=grafana -n monitoring
+
+
+  Problem : No data in Prometheus after ServiceMonitor deployed
+  ──────────────────────────────────────────────────────────────
+  Wait    : Prometheus discovery cycle can take up to 30s after apply.
+  Verify  : curl http://localhost:9090/api/v1/targets | python3 -c \
+              "import json,sys; [print(t['health'], t['scrapePool'])
+               for t in json.load(sys.stdin)['data']['activeTargets']]"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MONITORING IN CI/CD PIPELINE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  The ServiceMonitor is deployed as part of the CD pipeline (.github/workflows/cd.yaml):
+    kubectl apply -f k8s/api-metrics-servicemonitor.yaml
+    (applied after ingress.yaml — ensures it is always present after every deploy)
+
+  The kube-prometheus-stack is NOT managed by Terraform or the CD pipeline.
+  It is installed once manually (via Helm) and persists across app deployments.
+
+================================================================================

@@ -1,0 +1,150 @@
+================================================================================
+  EKS BOOKSTORE APP — ROLES, POLICIES & SECRETS REFERENCE
+  Last updated: April 10, 2026
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  IAM ROLES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. github-actions-bookstore-role
+   ─────────────────────────────
+   Purpose       : Used by GitHub Actions CI/CD pipelines to authenticate to AWS.
+                   No stored access keys — uses OIDC federation only.
+   Defined in    : terraform/iam.tf
+   Session TTL   : 3600 seconds (1 hour max)
+
+   Trust Policy:
+     Principal   : Federated OIDC provider (token.actions.githubusercontent.com)
+     Condition 1 : aud = "sts.amazonaws.com"
+     Condition 2 : sub = "repo:ShivamSoni1995/EKS-Bookstore-App:*"
+                   (only this repo can assume the role)
+
+   Attached Inline Policies:
+
+   a) github-actions-ecr-policy
+      Resource : bookstore-api ECR repo ARN
+                 bookstore-ui ECR repo ARN
+      Actions  : ecr:GetAuthorizationToken          (resource: *)
+                 ecr:BatchCheckLayerAvailability
+                 ecr:GetDownloadUrlForLayer
+                 ecr:BatchGetImage
+                 ecr:PutImage
+                 ecr:InitiateLayerUpload
+                 ecr:UploadLayerPart
+                 ecr:CompleteLayerUpload
+                 ecr:GetRepositoryPolicy
+
+   b) github-actions-eks-policy
+      Resource : arn:aws:eks:<region>:<account>:cluster/<cluster-name>
+      Actions  : eks:DescribeCluster
+                 eks:ListClusters   (resource: * — cannot be scoped)
+
+   Kubernetes RBAC mapping (aws-auth ConfigMap):
+     username : github-actions
+     groups   : system:masters  →  full cluster-admin inside EKS
+
+
+2. aws-lb-controller-<cluster-name>
+   ──────────────────────────────────
+   Purpose       : Allows the AWS Load Balancer Controller pod to create/manage
+                   ALBs, target groups, and security groups in AWS.
+   Defined in    : terraform/lb-controller.tf
+   Assumed via   : IRSA (IAM Roles for Service Accounts)
+                   Pod's K8s ServiceAccount is annotated with this role ARN.
+                   EKS handles the OIDC token exchange transparently.
+
+   Trust Policy:
+     Principal   : OIDC provider of the EKS cluster
+     Condition 1 : sub = "system:serviceaccount:kube-system:aws-load-balancer-controller"
+     Condition 2 : aud = "sts.amazonaws.com"
+
+   Attached Policy:
+     Name     : AWSLoadBalancerControllerIAMPolicy-<cluster-name>
+     Source   : terraform/lb-controller-policy.json  (v2.12.0)
+     Covers   : ec2:*, elasticloadbalancing:*, iam:CreateServiceLinkedRole,
+                cognito-idp, wafv2, shield, acm, route53
+     Note     : v2.12.0 required — older versions missing
+                ec2:GetSecurityGroupsForVpc and
+                elasticloadbalancing:DescribeListenerAttributes
+
+
+3. EKS Node IAM Role  (auto-managed by Terraform EKS module)
+   ───────────────────────────────────────────────────────────
+   Purpose       : Allows EC2 worker nodes to join the cluster, pull images
+                   from ECR, and publish logs/metrics.
+   Managed by    : terraform-aws-modules/eks (auto-created, not in iam.tf)
+
+   Attached AWS Managed Policies:
+     - AmazonEKSWorkerNodePolicy
+     - AmazonEKS_CNI_Policy
+     - AmazonEC2ContainerRegistryReadOnly
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  KUBERNETES RBAC
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Subject                          Kind            Namespace     Permissions
+  ─────────────────────────────────────────────────────────────────────────────
+  github-actions (IAM role mapped) User            cluster-wide  system:masters
+  aws-load-balancer-controller     ServiceAccount  kube-system   IRSA role above
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECRETS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  GitHub Repository Secrets  (Settings → Secrets and variables → Actions)
+  ─────────────────────────────────────────────────────────────────────────────
+  Name          : AWS_ROLE_ARN
+  Value         : arn:aws:iam::342206309108:role/github-actions-bookstore-role
+  Used by       : .github/workflows/ci.yaml  (build-and-push job)
+                  .github/workflows/cd.yaml  (deploy job)
+  How used      : Passed to aws-actions/configure-aws-credentials
+                  as role-to-assume — triggers OIDC token exchange
+
+  NOTE: This is the ONLY secret stored in GitHub.
+        No AWS_ACCESS_KEY_ID or AWS_SECRET_ACCESS_KEY are used.
+        The role ARN changes on every `terraform destroy` + `terraform apply`
+        and must be updated manually in GitHub repo settings.
+
+  Kubernetes Secrets  (auto-created by Helm, not manually managed)
+  ─────────────────────────────────────────────────────────────────────────────
+  Name          : prometheus-grafana
+  Namespace     : monitoring
+  Contains      : admin-user     = admin
+                  admin-password = bookstore-admin
+  How to read   : kubectl get secret prometheus-grafana -n monitoring \
+                    -o jsonpath="{.data.admin-password}" | base64 --decode
+
+  Name          : alertmanager-prometheus-kube-prometheus-alertmanager
+  Namespace     : monitoring
+  Contains      : Alertmanager configuration (auto-generated by Helm)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SECURITY DESIGN NOTES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. No long-lived AWS credentials — OIDC tokens expire after 1 hour.
+
+  2. Repo-scoped trust — the IAM role can only be assumed by pipelines
+     running in ShivamSoni1995/EKS-Bookstore-App (enforced by sub condition).
+
+  3. Least privilege on ECR — scoped to only the two specific ECR repo ARNs,
+     not all of ECR.
+
+  4. Least privilege on EKS — only DescribeCluster + ListClusters at the AWS
+     API level. Full access inside the cluster is granted separately via
+     Kubernetes RBAC (system:masters in aws-auth ConfigMap).
+
+  5. IRSA for LB controller — the pod never holds AWS credentials in env vars.
+     The OIDC exchange between the pod's ServiceAccount token and AWS STS
+     is handled transparently by EKS.
+
+  6. ECR lifecycle policy — keeps only the last 5 images per repo, reducing
+     storage exposure and cost.
+
+================================================================================
